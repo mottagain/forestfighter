@@ -1,6 +1,7 @@
 
 const pixelsPerFrameKeyboardVelocity = 5;
 const playerSpawnInvulnerabilityTime = 200;
+const slotChangeCooldownTime = 15;
 
 
 // Canvas setup
@@ -175,6 +176,15 @@ class AnimationStateComponent extends Component {
         this.pauseAfterFrame = pauseAfterFrame;
         this.deleteAfterComplete = deleteAfterComplete ?? false;
         this.animationComplete = false;
+    }
+}
+
+class AttackSlotSelectedComponent extends Component {
+    constructor(entityId, playerNum) {
+        super(entityId);
+        this.playerNum = playerNum;
+        this.slot = 0;
+        this.slotChangeCooldown = 0;
     }
 }
 
@@ -553,6 +563,7 @@ class GamePhaseSystem extends System {
         if (systemManager.currentPhase == 'pregame') {
             var keyPressedComponent = getKeyboardKeyPressedComponent(componentManager, ' ');
             if (keyPressedComponent) {
+                componentManager.removeAllComponentInstances('StartGameComponent');
                 componentManager.addComponents(
                     new ChangePhaseComponent(componentManager.createEntity(), 'game'),
                     new StartGameComponent(componentManager.createEntity(), 2),
@@ -641,13 +652,11 @@ class PlayerSystem extends System {
     startup(componentManager) {
         const numPlayerQuery = componentManager.getView('StartGameComponent');
         const [startGameComponent] = numPlayerQuery[0];
-        componentManager.removeAllComponentInstances('StartGameComponent');
+        const players = startGameComponent.numberOfPlayers;
 
         var playerSprites = [];
         playerSprites[0] = 'Sundew';
         playerSprites[1] = 'Willow';
-
-        const players = startGameComponent.numberOfPlayers;
 
         var playerYOffset = -100;
         for (var i = players -1; i >= 0; i--) {
@@ -689,8 +698,6 @@ class PlayerSystem extends System {
             const buttonsDown = GamepadInputSystem.getButtonPressedMap(componentManager, playerComponent.playerNum);
 
             // Handle move
-            // if ((keysDown.has('a') || buttonsDown.has('left')) && positionComponent.positionX > 40) velocityComponent.velocityX -= pixelsPerFrameKeyboardVelocity;
-            // if ((keysDown.has('d') || buttonsDown.has('right')) && positionComponent.positionX < canvas.width - 40) velocityComponent.velocityX += pixelsPerFrameKeyboardVelocity;
             if ((keysDown.has('w') || buttonsDown.has('up')) && positionComponent.positionY > 350) velocityComponent.velocityY -= pixelsPerFrameKeyboardVelocity;
             if ((keysDown.has('s') || buttonsDown.has('down')) && positionComponent.positionY < 890) velocityComponent.velocityY += pixelsPerFrameKeyboardVelocity;
 
@@ -884,6 +891,74 @@ class EnemySystem extends System {
 //     }
 // }
 
+const slotPositions = [
+    { x: 110, y: 1187 },
+    { x: 230, y: 1187 },
+    { x: 355, y: 1187 },
+    { x: 110, y: 1339 },
+    { x: 230, y: 1339 },
+    { x: 355, y: 1339 },
+];
+
+class AttackSelectionSystem extends System {
+    constructor() {
+        super("game");
+    }
+
+    startup(componentManager) {
+
+        const numPlayerQuery = componentManager.getView('StartGameComponent');
+        const [startGameComponent] = numPlayerQuery[0];
+        const players = startGameComponent.numberOfPlayers;
+
+        for (let i = 0; i < players; i++) {
+
+            // Create selected slot icons
+            const entityId = componentManager.createEntity();
+            componentManager.addComponents(
+                new AttackSlotSelectedComponent(entityId, i),
+                new PositionComponent(entityId, slotPositions[0].x, slotPositions[0].y),
+                new SpriteComponent(entityId, "player" + i + "selection", i, 7, false),
+                new AnimationStateComponent(entityId, true, 20),
+            ); 
+        }
+    }
+
+    teardown(componentManager) {
+        const view = componentManager.getView('AttackSlotSelectedComponent');
+        for (const [attackSlotSelectedComponent] of view) {
+            componentManager.removeEntity(attackSlotSelectedComponent.entityId);
+        }
+    }
+
+    update (componentManager, gameFrame) {
+        // Check input and potentially move selection
+        const view = componentManager.getView('AttackSlotSelectedComponent', 'PositionComponent');
+        for (const [attackSlotSelectedComponent, positionComponent] of view) {
+            const keysDown = attackSlotSelectedComponent.playerNum == 0 ? KeyboardInputSystem.getKeyPressedMap(componentManager) : new Map();
+            const buttonsDown = GamepadInputSystem.getButtonPressedMap(componentManager, attackSlotSelectedComponent.playerNum);
+
+            if (attackSlotSelectedComponent.slotChangeCooldown > 0) {
+                attackSlotSelectedComponent.slotChangeCooldown--;
+            }
+            else {
+                const slot = attackSlotSelectedComponent.slot;
+                let newSlot = slot;
+
+                if (keysDown.has('a') || buttonsDown.has('left')) newSlot = (slot == 0)?(5):(slot - 1);
+                if (keysDown.has('d') || buttonsDown.has('right')) newSlot = (slot == 5)?(0):(slot + 1);
+
+                if (newSlot != slot) {
+                    attackSlotSelectedComponent.slot = newSlot;
+                    positionComponent.positionX = slotPositions[newSlot].x;
+                    positionComponent.positionY = slotPositions[newSlot].y;
+                    attackSlotSelectedComponent.slotChangeCooldown = slotChangeCooldownTime;
+                }
+            }
+        }
+    }
+}
+
 class BackgroundSystem extends System {
     constructor() {
         super("game");
@@ -1012,6 +1087,7 @@ systemManager.registerSystem(new KeyboardInputSystem());
 systemManager.registerSystem(new GamepadInputSystem());
 systemManager.registerSystem(new GamePhaseSystem());
 systemManager.registerSystem(new BackgroundSystem());
+systemManager.registerSystem(new AttackSelectionSystem());
 systemManager.registerSystem(new PlayerSystem());
 systemManager.registerSystem(new MovementSystem());
 // systemManager.registerSystem(new CollisionDetectionSystem());
@@ -1027,12 +1103,16 @@ const backgroundImage = createImage('background.png');
 const hivewingImage = createImage('hivewing.png');
 const sundewImage = createImage('sundew.png');
 const willowImage = createImage('willow.png');
+const player0selection = createImage('player0selection.png');
+const player1selection = createImage('player1selection.png');
 
 componentManager.addComponents(
     new SpriteSheetComponent(componentManager.createEntity(), 'Hivewing', hivewingImage, 1, 2, 2, 32, 32),
     new SpriteSheetComponent(componentManager.createEntity(), 'Sundew', sundewImage, 1, 2, 2, 32, 32),
     new SpriteSheetComponent(componentManager.createEntity(), 'Willow', willowImage, 1, 2, 2, 32, 32),
     new SpriteSheetComponent(componentManager.createEntity(), 'Background', backgroundImage, 9, 5, 42, 128, 256),
+    new SpriteSheetComponent(componentManager.createEntity(), 'player0selection', player0selection, 1, 2, 2, 16, 16),
+    new SpriteSheetComponent(componentManager.createEntity(), 'player1selection', player1selection, 1, 2, 2, 16, 16),
 );
 
 systemManager.startup(componentManager);

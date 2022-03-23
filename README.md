@@ -2,8 +2,8 @@
 A Wings of Fire inspired game set in the poison jungle.
 
 # TODO
-* Selection box
-* Attacks
+* Attack selection
+* Perform attack
 * Health
 * Enemy attacks
 * Waves
